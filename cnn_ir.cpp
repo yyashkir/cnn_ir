@@ -1,8 +1,8 @@
 //	Copyright © 2018 Yashkir Consulting
 /*
-26/12/2018	-	hjm model fast calibration project started
-				random driver generation moved out of Monte Carlo loop (cube ji6)
-28/12/2018	-	end
+04/02/2019	-	 started
+				
+  /  /2019	-	end
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,31 +22,33 @@ using namespace std;
 // global variables and constants
 string s;
 
-arma::Row <int> tenors;		//tenors are expressed using  time point array  
-arma::Mat <double> historical_dataset;		// input hist data rates for all tenor over period of time
+arma::Row <int> tenors;		//tenors (in days)  
+arma::Mat <double> historical_dataset;		// input hist data rates for all tenors over period of time
 string historical_datafile;	// file with historical yield rates 
 arma::Mat <double> train_dataset;		// input hist data rates for all tenor over period of time
 arma::Mat <double> validation_dataset;		// input hist data rates for all tenor over period of time
 
 double pi = 3.14159265359;
-int i_start_train;		// start day from historical yield data
-int train_size;	// train size
-int i_start_validation;			// length (days) of historical rates used for calibration
+int i_start_train;		// start day from historical yield data for training set
+int train_size;			// train size
+int i_start_validation;	// start day from historical yield data for validation set
 int validation_size;
-int N;	// yield length
-int M;	// sample size
+int N;	// yield length (number of columns in data file)
+int M;	// sample size	(number of rows == days)
 int Mf;	// filter length
 int Nf;	// filter width
-int V;	// vectorize_concatenate length
+int V;	// vectorized_concatenated set of filters transformed to vector (length)
 int i_hist;			// total number of lines in file with historical yields
-int	forcast_range;		// number of time steps forward for prediction
+int	forcast_range;	// number of days forward for yield forcast
 int kernel_size;
-int Q; // number of filters
-int  iteration_max_number;
-double h;	// learning rate
-
+int Q;				// number of filters
+int  I;				// number of iterations
+double h;			// learning rate
+double h_start;
 clock_t start;
-
+int i_minValErr;
+double minValErr = 0;
+//
 // reading data from input files:
 void  read_input_files(char *argv)
 {
@@ -69,16 +71,17 @@ void  read_input_files(char *argv)
 		>> s >> forcast_range
 		>> s >> kernel_size
 		>> s >> Q
-		>> s >> iteration_max_number
+		>> s >> I
 		>> s >> h
 		;
+	h_start = h;
 	infile.close();
 	//
 		//reading historical rates 
 	ifstream data_stream(historical_datafile.c_str());
 	data_stream >> N;		// number of tenors (=columns)
 	tenors.set_size(N);
-	data_stream >> i_hist;		// number of lines in file with historical yields
+	data_stream >> i_hist;	// number of lines in file with historical yields
 	for (k = 0; k < N; k++)
 		data_stream >> tenors(k);
 	//
@@ -87,7 +90,7 @@ void  read_input_files(char *argv)
 		for (k = 0; k < N; k++)
 			data_stream >> historical_dataset(i, k);
 	data_stream.close();
-	cout << "\nHistorical_dataset number of rows: " << historical_dataset.n_rows << endl;
+	cout << "\nHistorical_dataset (number of rows): " << historical_dataset.n_rows << endl;
 	//
 	train_size = min(train_size, i_hist - i_start_train);
 	train_dataset.set_size(train_size, N);
@@ -105,11 +108,10 @@ void  read_input_files(char *argv)
 	st << "Training set: " << train_dataset.n_rows << " rows";
 	sv << "Validation set: " << validation_dataset.n_rows << " rows";
 	cout << endl << st.str() << endl << sv.str() << endl;
-	/*train_dataset.print(st.str());
-	validation_dataset.print(sv.str());*/
-	Mf = M - kernel_size + 1;
-	Nf = N - kernel_size + 1;
-	V = Q * Mf * Nf;
+//
+	Mf = M - kernel_size + 1;	// filter length
+	Nf = N - kernel_size + 1;	// filter width
+	V = Q * Mf * Nf;			// long vector length
 }
 //
 void iteration_loop()
@@ -124,44 +126,44 @@ void iteration_loop()
 	ofstream out_obj_fn;
 	out_obj_fn.open("err.csv");
 	arma::Mat <double> ERR;
-	ERR.set_size(iteration_max_number, 3);
+	ERR.set_size(I, 3);
 	ERR.fill(0);
 	arma::Mat <double> x;	//input (hist sample)
 	x.set_size(M, N);
-	arma::Row <double> y;	//output (hist)
+	arma::Row <double> y;	//output (hist for sample x)
 	y.set_size(N);
-//****************************************
-	arma::Cube <double> weights;
+//
+	arma::Cube <double> weights;	// weiths: input layer -> set of filters 
 	weights.set_size(Q, kernel_size, kernel_size);
-	arma::Row <double> bias;
+	arma::Row <double> bias;		// biases: input layer -> set of filters 
 	bias.set_size(Q);
-	arma::Cube <double> z;
+	arma::Cube <double> z;			// weighted average: input layer -> set of filters (input)
 	z.set_size(Q, M, N);
-	arma::Cube <double> a;
+	arma::Cube <double> a;			// neurons responce: from set of filters (outnput)
 	a.set_size(Q, M, N);
-	arma::Mat <int> sqmn;
+	arma::Mat <int> sqmn;			// reference: long vector index for given q,m,n (filter number,filter row,filter column) 
 	sqmn.set_size(V,3);
-	arma::Row <double> v;
+	arma::Row <double> v;			// all filters fed to vector 'v' (scan column by column)
 	v.set_size(V);
-	arma::Row <double> z_star;
+	arma::Row <double> z_star;		// weighted average: hidden layer (filters) to output layer
 	z_star.set_size(N);
-	arma::Mat <double> weights_star;
+	arma::Mat <double> weights_star;// weiths: long vector (fused filters) -> output layer 
 	weights_star.set_size(V, N);
-	arma::Row <double> bias_star;
+	arma::Row <double> bias_star;   // biases: long vector (fused filters) -> output layer  
 	bias_star.set_size(N);
-	arma::Row <double> a_star;
+	arma::Row <double> a_star;		// neurons responce of output layer (final output)
 	a_star.set_size(N);
 
-	arma::Row <double> Dbias_star;
+	arma::Row <double> Dbias_star;	// derivatives by 'bias_star'
 	Dbias_star.set_size(N);
-	arma::Mat <double> Dweights_star;
+	arma::Mat <double> Dweights_star;// derivatives by 'weights_star'
 	Dweights_star.set_size(V, N);
-	arma::Row <double> Dbias;
+	arma::Row <double> Dbias;		// derivatives by 'bias'
 	Dbias.set_size(Q);
-	arma::Cube <double> Dweights;
+	arma::Cube <double> Dweights;	// derivatives by 'weights'
 	Dweights.set_size(Q, kernel_size, kernel_size);
-
-	//
+//
+	// filling reference list
 	for (s = 0; s < V; s++)
 	{
 		q = (int)(s / (Mf * Nf));
@@ -171,10 +173,8 @@ void iteration_loop()
 		sqmn(s, 1) = m;
 		sqmn(s, 2) = n;
 	}
-//	sqmn.print("sqmn");
-	
-	//
-		// random fill of all weights and biases:
+//
+	// random fill of all weights and biases:
 	for (p = 0; p < N; p++)
 	{
 		bias_star(p) = arma::randn();
@@ -188,47 +188,46 @@ void iteration_loop()
 			for (beta = 0; beta < kernel_size; beta++)
 				weights(q, alpha, beta) = arma::randn();
 	}
-
-	int flag = 0;
+//
 	//main iteration loop starts here:
-	for (it = 0; it < iteration_max_number; it++)
+	for (it = 0; it < I; it++)
 	{
 		Dbias_star.fill(0);
 		Dweights_star.fill(0);
 		Dbias.fill(0);
 		Dweights.fill(0);
-		//over all samples:
+		// going over all samples:
 		for (i = M; i < train_size - forcast_range; i++)
 		{
 			ERR(it, 0) = it;
-			// forward propagation through neural network
+			// forward propagation through neural network for a sample (i,i+M)
 			// filling x(sample) and y(forcast)
 			for (k = 0; k < N; k++)
 			{
 				y(k) = train_dataset(i + forcast_range, k);	//rates at date 'i+fwd_range' for tenor number 'k' (output)
 				for(j = 0; j < M; j++ )
-					x(j,k) = train_dataset(i - M + j, k);				//rates at date 'i' for tenor number 'k' (input)	
+					x(j,k) = train_dataset(i - M + j, k);	//rates at date 'j' for tenor number 'k' (input)	
 			}
-			// z(qmn):
-			for (q = 0; q < Q; q++)
+			// weighted average z(qmn):
+			for (q = 0; q < Q; q++)			// over all filters
 			{
-				for (m = 0; m < Mf; m++)
+				for (m = 0; m < Mf; m++)	// by rows
 				{
-					for (n = 0; n < Nf; n++)
+					for (n = 0; n < Nf; n++)// by columns
 					{
 						sum = 0;
 						for (alpha = 0; alpha < kernel_size; alpha++)
 							for (beta = 0; beta < kernel_size; beta++)
 								sum = sum + x(m + alpha, n + beta) * weights(q,alpha, beta);
 						z(q, m, n) = sum + bias(q);			//weighted average
-						a(q, m, n) = sigmoid(z(q, m, n));	//output
+						a(q, m, n) = sigmoid(z(q, m, n));	//neuroresponce
 					}
 				}
 			}
-			//filling vectorized_concatenated object
+			//filling vectorized_concatenated object ("long vector")
 			for (s = 0; s < V; s++)
 				v(s) = a(sqmn(s,0), sqmn(s, 1), sqmn(s, 2));	// a(q,m,n) for given s
-
+//
 			// z*: and a*:
 			for (p = 0; p < N; p++)
 			{
@@ -238,16 +237,15 @@ void iteration_loop()
 					sum = sum + v(s) * weights_star(s, p);
 				}
 				z_star(p) = sum + bias_star(p);
-				a_star(p) = sigmoid(z_star(p));
+				a_star(p) = sigmoid(z_star(p));	// output layer neuroresponce
 				ERR(it,1) = ERR(it,1) + pow(a_star(p) - y(p), 2) / train_size;	//accumulation of errors
 			}
-  
-			//derivatives calculation
-			double tau_p;
+//  
+			// Calculation of derivatives 
+			double tau_p; 
 			for (p = 0; p < N; p++)
 			{
-				tau_p = (a_star(p) - y(p)) * sigmoid_d(z_star(p)) ;
-				
+				tau_p = (a_star(p) - y(p)) * sigmoid_d(z_star(p)) ;	
 				Dbias_star(p) = Dbias_star(p) + tau_p / train_size;
 				for(s = 0; s < V; s++)
 					Dweights_star(s,p) = Dweights_star(s, p) + tau_p * v(s) / train_size;
@@ -258,7 +256,6 @@ void iteration_loop()
 				for (p = 0; p < N; p++)
 				{
 					tau_p = (a_star(p) - y(p)) * sigmoid_d(z_star(p));
-					
 					sum_mn = 0;
 					for(m=0;m<Mf;m++)
 					{
@@ -282,7 +279,6 @@ void iteration_loop()
 						for (p = 0; p < N; p++)
 						{
 							tau_p = (a_star(p) - y(p)) * sigmoid_d(z_star(p));
-							
 							sum_mn = 0;
 							for (m = 0; m < Mf; m++)
 							{
@@ -298,76 +294,56 @@ void iteration_loop()
 					}
 				}
 			}
-			
-
-		}	//single iteration forward/back propagation & derivatives calculation ends here
-
+		}	//forward/back propagation & derivatives calculation for current iteration ends here
+//
 		//validation starts here:
-		//for (i = 0; i < validation_size - fwd_range; i++)
-		//{
-		//	// forward propagation through neural network
-		//	for (k = 0; k < N; k++)
-		//	{
-		//		x(k) = validation_dataset(i, k);				//input
-		//		y(k) = validation_dataset(i + fwd_range, k);	//output
-		//	}
-		//	z_01 = x * weight_01 + bias_01;		// weighted average for entry to hidden layer '1'
-		//	for (k = 0; k < N; k++)
-		//	{
-		//		a_1(k) = sigmoid(z_01(k));		//out of hidden layer '1'
-		//	}
-		//	z_12 = a_1 * weight_12 + bias_12;	// weighted average for entry to output layer '2'
-		//	for (k = 0; k < N; k++)
-		//	{
-		//		a_2(k) = sigmoid(z_12(k));		// out of output layer '2'
-		//		ERR(it, 2) = ERR(it, 2) + pow(a_2(k) - y(k), 2) / validation_size;	//error accumulation
-		//	}
-
-		//}	//validation end
-		//if (it > 1 && ERR(it - 2, 2) >= ERR(it - 1, 2) && ERR(it - 1, 2) <= ERR(it, 2) || it == iteration_max_number - 1)
-		//{
-		//	cout << endl << it - 1 << " " << ERR(it - 1, 2) << " (minimal validation error)";
-		//	//illustration
-		//	i = 0;
-		//	// prediction example:
-		//	for (k = 0; k < N; k++)
-		//	{
-		//		x(k) = validation_dataset(i, k);				//input
-		//		y(k) = validation_dataset(i + fwd_range, k);	//output
-		//	}
-		//	z_01 = x * weight_01 + bias_01;		// weighted average for entry to hidden layer '1'
-		//	for (k = 0; k < N; k++)
-		//	{
-		//		a_1(k) = sigmoid(z_01(k));		//out of hidden layer '1'
-		//	}
-		//	z_12 = a_1 * weight_12 + bias_12;	// weighted average for entry to output layer '2'
-		//	for (k = 0; k < N; k++)
-		//	{
-		//		a_2(k) = sigmoid(z_12(k));		// out of output layer '2'
-		//	}
-		//	y.print("\ny for validation set i=0");
-		//	a_2.print("a_2 modelled");
-		//	cout << endl << "optimal weights and biases:";
-		//	weight_01.print("\nw01");	weight_01.save("weight_01.opt", arma::raw_ascii);
-		//	bias_01.print("b01");		bias_01.save("bias_01.opt", arma::raw_ascii);
-		//	weight_12.print("w12");		weight_12.save("weight_12.opt", arma::raw_ascii);
-		//	bias_12.print("b12");		bias_12.save("bias_12.opt", arma::raw_ascii);
-		//}
-		////
-		//cout << '.';
-		////
-		//		// derivatives by weights calculation:
-		//for (i = back_range; i < train_size - fwd_range; i++)
-		//{
-		//	for (k = 0; k < N; k++)
-		//	{
-		//		for (j = 0; j < N; j++)
-		//		{
-		//			w_d01(k, j) = w_d01(k, j) + delta_01(i, j) * a_1all(i, k) / train_size;
-		//			w_d12(k, j) = w_d12(k, j) + delta_12(i, j) * a_2all(i, k) / train_size;
-		//		}
-		//	}
-		//}
+		for (i = M; i < validation_size - forcast_range; i++)
+		{
+			// forward propagation through neural network
+			// filling x(sample) and y(forcast)
+			for (k = 0; k < N; k++)
+			{
+				y(k) = validation_dataset(i + forcast_range, k);	//rates at date 'i+fwd_range' for tenor number 'k' (output)
+				for (j = 0; j < M; j++)
+					x(j, k) = validation_dataset(i - M + j, k);				//rates at date 'i' for tenor number 'k' (input)	
+			}
+			// z(qmn):
+			for (q = 0; q < Q; q++)
+			{
+				for (m = 0; m < Mf; m++)
+				{
+					for (n = 0; n < Nf; n++)
+					{
+						sum = 0;
+						for (alpha = 0; alpha < kernel_size; alpha++)
+							for (beta = 0; beta < kernel_size; beta++)
+								sum = sum + x(m + alpha, n + beta) * weights(q, alpha, beta);
+						z(q, m, n) = sum + bias(q);			//weighted average
+						a(q, m, n) = sigmoid(z(q, m, n));	//output
+					}
+				}
+			}
+			//filling vectorized_concatenated object
+			for (s = 0; s < V; s++)
+				v(s) = a(sqmn(s, 0), sqmn(s, 1), sqmn(s, 2));	// a(q,m,n) for given s
+			// z*: and a*:
+			for (p = 0; p < N; p++)
+			{
+				sum = 0;
+				for (s = 0; s < V; s++)
+				{
+					sum = sum + v(s) * weights_star(s, p);
+				}
+				z_star(p) = sum + bias_star(p);
+				a_star(p) = sigmoid(z_star(p));
+				ERR(it, 2) = ERR(it, 2) + pow(a_star(p) - y(p), 2) / validation_size;	//accumulation of errors
+			}
+		}
+		if (minValErr > ERR(it, 2))
+		{
+			i_minValErr = it;
+			minValErr = ERR(it, 2);
+		}
 		//gradient downhill step:
 		for (p = 0; p < N; p++)
 		{
@@ -388,11 +364,13 @@ void iteration_loop()
 			}
 		}
 		cout << "|";
-	}	//iteration loop end
-
+	}	//iteration loop ends here
+//
+	cout << endl << "Final training error= " << ERR(I - 1, 1);
+	cout << endl << "Minimal validation error= " << minValErr << " at " << i_minValErr << " -th iteration";
 	int it_min = 0;
 	double min_val_err = 1e12;
-	for (it = 1; it < iteration_max_number; it++)
+	for (it = 1; it < I; it++)
 		if (ERR(it, 2) < min_val_err)
 		{
 			it_min = it;
@@ -404,7 +382,7 @@ void iteration_loop()
 	//ERR.save(out_obj_fn, arma::raw_ascii);
 //	error vs iterations saving to a file:
 	out_obj_fn << "iteration,err,validation_err";
-	for (it = 0; it < iteration_max_number; it++)
+	for (it = 0; it < I; it++)
 		out_obj_fn << endl << ERR(it, 0) << "," << ERR(it, 1) << "," << ERR(it, 2);
 	out_obj_fn.close();
 	//
