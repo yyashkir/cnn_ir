@@ -6,4 +6,4 @@
 eur*
 *.user
 *.bak
-
+.ipynb_checkpoints
