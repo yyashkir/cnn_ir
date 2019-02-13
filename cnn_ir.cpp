@@ -46,8 +46,8 @@ int  I;				// number of iterations
 double h;			// learning rate
 double h_start;
 clock_t start;
-int i_minValErr;
-double minValErr = 0;
+int ny ;
+
 //
 // reading data from input files:
 void  read_input_files(char *argv)
@@ -73,6 +73,7 @@ void  read_input_files(char *argv)
 		>> s >> Q
 		>> s >> I
 		>> s >> h
+		>> s >> ny
 		;
 	h_start = h;
 	infile.close();
@@ -80,6 +81,7 @@ void  read_input_files(char *argv)
 		//reading historical rates 
 	ifstream data_stream(historical_datafile.c_str());
 	data_stream >> N;		// number of tenors (=columns)
+
 	tenors.set_size(N);
 	data_stream >> i_hist;	// number of lines in file with historical yields
 	for (k = 0; k < N; k++)
@@ -112,6 +114,11 @@ void  read_input_files(char *argv)
 	Mf = M - kernel_size + 1;	// filter length
 	Nf = N - kernel_size + 1;	// filter width
 	V = Q * Mf * Nf;			// long vector length
+	if (Mf < 1 || Nf < 1)
+	{
+		cout << endl << "kernel size cannot exceed " << min(M,N);
+		exit(0);
+	}
 }
 //
 void iteration_loop()
@@ -125,6 +132,10 @@ void iteration_loop()
 	int alpha, beta;
 	ofstream out_obj_fn;
 	out_obj_fn.open("err.csv");
+	ofstream a2y;
+	a2y.open("a2y.csv");
+	a2y << "y,a";
+	
 	arma::Mat <double> ERR;
 	ERR.set_size(I, 3);
 	ERR.fill(0);
@@ -338,12 +349,10 @@ void iteration_loop()
 				a_star(p) = sigmoid(z_star(p));
 				ERR(it, 2) = ERR(it, 2) + pow(a_star(p) - y(p), 2) / validation_size;	//accumulation of errors
 			}
+			if (it == I - 1)
+				a2y << endl<<y(ny) << "," << a_star(ny);
 		}
-		if (minValErr > ERR(it, 2))
-		{
-			i_minValErr = it;
-			minValErr = ERR(it, 2);
-		}
+//				
 		//gradient downhill step:
 		for (p = 0; p < N; p++)
 		{
@@ -367,7 +376,6 @@ void iteration_loop()
 	}	//iteration loop ends here
 //
 	cout << endl << "Final training error= " << ERR(I - 1, 1);
-	cout << endl << "Minimal validation error= " << minValErr << " at " << i_minValErr << " -th iteration";
 	int it_min = 0;
 	double min_val_err = 1e12;
 	for (it = 1; it < I; it++)
@@ -376,7 +384,7 @@ void iteration_loop()
 			it_min = it;
 			min_val_err = ERR(it, 2);
 		}
-	cout << endl << "val err is min for it=" << it_min;
+	cout << endl << "Minimal validation error= " << min_val_err << " at iteration " << it_min;
 	cout << endl << it << " iterations completed" << endl;
 
 	//ERR.save(out_obj_fn, arma::raw_ascii);
@@ -385,20 +393,19 @@ void iteration_loop()
 	for (it = 0; it < I; it++)
 		out_obj_fn << endl << ERR(it, 0) << "," << ERR(it, 1) << "," << ERR(it, 2);
 	out_obj_fn.close();
+	a2y.close();
 	//
-
-
-
 }
 //	
 int main(int argc, char **argv)
 {
-	cout << "Reading input files: ";
-	read_input_files(argv[1]);
+	cout << "Reading input files: "<<endl; 
+	read_input_files(argv[1]); 
 	iteration_loop();
 	//
 		// errors vs iteration: python code call
 	system("python view.py");
+	system("python a2y.py");
 	//
 	return 0;
 }

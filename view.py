@@ -1,8 +1,7 @@
 import matplotlib.pyplot
-
 matplotlib.pyplot.plotfile('err.csv', ('iteration','err','validation_err'),subplots=False, 
                               plotfuncs={'err': 'loglog','validation_err':'loglog'},
-							  linestyle=':',linewidth=4)
+							  linestyle='-',linewidth=2)
 matplotlib.pyplot.grid(which="both")
 matplotlib.pyplot.title('Error vs iteration')
 matplotlib.pyplot.savefig('err.png')
