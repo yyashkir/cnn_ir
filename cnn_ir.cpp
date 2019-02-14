@@ -44,6 +44,7 @@ int kernel_size;
 int Q;				// number of filters
 int  I;				// number of iterations
 double h;			// learning rate
+
 double h_start;
 clock_t start;
 int ny ;
@@ -200,6 +201,8 @@ void iteration_loop()
 				weights(q, alpha, beta) = arma::randn();
 	}
 //
+	int flag = 0;
+	int it_min = -10000;
 	//main iteration loop starts here:
 	for (it = 0; it < I; it++)
 	{
@@ -349,8 +352,16 @@ void iteration_loop()
 				a_star(p) = sigmoid(z_star(p));
 				ERR(it, 2) = ERR(it, 2) + pow(a_star(p) - y(p), 2) / validation_size;	//accumulation of errors
 			}
-			if (it == I - 1)
-				a2y << endl<<y(ny) << "," << a_star(ny);
+			if (it == it_min + 2 || it == I - 1 && flag == 0)
+			{
+				a2y << endl << y(ny) << "," << a_star(ny);
+				if (i == M)a2y << endl << y(ny) << "," << 0;
+			}
+		}
+		if (it > 1 && ERR(it - 2, 2) >= ERR(it - 1, 2) && ERR(it - 1, 2) <= ERR(it, 2) || it == I - 1)
+		{
+			it_min = it - 1;
+			flag = 1;
 		}
 //				
 		//gradient downhill step:
@@ -372,11 +383,12 @@ void iteration_loop()
 				}
 			}
 		}
-		cout << "|";
+		if ((it / 50) * 50 == it) 	cout << "							" << it << "\r";
+
 	}	//iteration loop ends here
 //
 	cout << endl << "Final training error= " << ERR(I - 1, 1);
-	int it_min = 0;
+	
 	double min_val_err = 1e12;
 	for (it = 1; it < I; it++)
 		if (ERR(it, 2) < min_val_err)
@@ -399,11 +411,13 @@ void iteration_loop()
 //	
 int main(int argc, char **argv)
 {
+
 	cout << "Reading input files: "<<endl; 
 	read_input_files(argv[1]); 
 	iteration_loop();
 	//
 		// errors vs iteration: python code call
+	system("play.bat");
 	system("python view.py");
 	system("python a2y.py");
 	//
