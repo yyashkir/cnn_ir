@@ -40,7 +40,8 @@ int Nf;	// filter width
 int V;	// vectorized_concatenated set of filters transformed to vector (length)
 int i_hist;			// total number of lines in file with historical yields
 int	forcast_range;	// number of days forward for yield forcast
-int kernel_size;
+int kernel_size;	// width
+int kernel_length;
 int Q;				// number of filters
 int  I;				// number of iterations
 double h;			// learning rate
@@ -71,6 +72,7 @@ void  read_input_files(char *argv)
 		>> s >> M
 		>> s >> forcast_range
 		>> s >> kernel_size
+		>> s >> kernel_length
 		>> s >> Q
 		>> s >> I
 		>> s >> h
@@ -112,7 +114,7 @@ void  read_input_files(char *argv)
 	sv << "Validation set: " << validation_dataset.n_rows << " rows";
 	cout << endl << st.str() << endl << sv.str() << endl;
 //
-	Mf = M - kernel_size + 1;	// filter length
+	Mf = M - kernel_length + 1;	// filter length
 	Nf = N - kernel_size + 1;	// filter width
 	V = Q * Mf * Nf;			// long vector length
 	if (Mf < 1 || Nf < 1)
@@ -146,7 +148,7 @@ void iteration_loop()
 	y.set_size(N);
 //
 	arma::Cube <double> weights;	// weiths: input layer -> set of filters 
-	weights.set_size(Q, kernel_size, kernel_size);
+	weights.set_size(Q, kernel_length, kernel_size);
 	arma::Row <double> bias;		// biases: input layer -> set of filters 
 	bias.set_size(Q);
 	arma::Cube <double> z;			// weighted average: input layer -> set of filters (input)
@@ -173,7 +175,7 @@ void iteration_loop()
 	arma::Row <double> Dbias;		// derivatives by 'bias'
 	Dbias.set_size(Q);
 	arma::Cube <double> Dweights;	// derivatives by 'weights'
-	Dweights.set_size(Q, kernel_size, kernel_size);
+	Dweights.set_size(Q, kernel_length, kernel_size);
 //
 	// filling reference list
 	for (s = 0; s < V; s++)
@@ -230,7 +232,7 @@ void iteration_loop()
 					for (n = 0; n < Nf; n++)// by columns
 					{
 						sum = 0;
-						for (alpha = 0; alpha < kernel_size; alpha++)
+						for (alpha = 0; alpha < kernel_length; alpha++)
 							for (beta = 0; beta < kernel_size; beta++)
 								sum = sum + x(m + alpha, n + beta) * weights(q,alpha, beta);
 						z(q, m, n) = sum + bias(q);			//weighted average
@@ -285,7 +287,7 @@ void iteration_loop()
 			}
 			for (q = 0; q < Q; q++)
 			{
-				for (alpha = 0; alpha < kernel_size; alpha++)
+				for (alpha = 0; alpha < kernel_length; alpha++)
 				{
 					for (beta = 0; beta < kernel_size; beta++)
 					{
@@ -329,7 +331,7 @@ void iteration_loop()
 					for (n = 0; n < Nf; n++)
 					{
 						sum = 0;
-						for (alpha = 0; alpha < kernel_size; alpha++)
+						for (alpha = 0; alpha < kernel_length; alpha++)
 							for (beta = 0; beta < kernel_size; beta++)
 								sum = sum + x(m + alpha, n + beta) * weights(q, alpha, beta);
 						z(q, m, n) = sum + bias(q);			//weighted average
@@ -375,7 +377,7 @@ void iteration_loop()
 		}
 		for (q = 0; q < Q; q++)
 		{
-			for (alpha = 0; alpha < kernel_size; alpha++)
+			for (alpha = 0; alpha < kernel_length; alpha++)
 			{
 				for (beta = 0; beta < kernel_size; beta++)
 				{
