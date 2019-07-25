@@ -419,9 +419,13 @@ int main(int argc, char **argv)
 	iteration_loop();
 	//
 		// errors vs iteration: python code call
-	system("play.bat");
-	system("python view.py");
-	system("python a2y.py");
+//	system("play.bat");
+	string v = "C:\\ProgramData\\Anaconda3\\python.exe view.py";
+	string a = "C:\\ProgramData\\Anaconda3\\python.exe a2y.py";
+	const char *vc = v.c_str();
+	const char *ac = a.c_str();
+	system(vc);
+	system(ac);
 	//
 	return 0;
 }

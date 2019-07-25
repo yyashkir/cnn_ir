@@ -7,3 +7,14 @@ eur*
 *.user
 *.bak
 .ipynb_checkpoints
+torch/
+x64/
+*.com
+*.csv
+*.bat
+*.in
+*.mp3
+*.png
+*.mid
+
+
