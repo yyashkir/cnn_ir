@@ -6,6 +6,6 @@ forcast_range	1
 kernel_size	1
 kernel_length	4
 number_of_filters	1
-iteration_max_number	1000
+iteration_max_number	100
 learning_rate	5
 yield_numb	2
